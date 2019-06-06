@@ -1,0 +1,29 @@
+version: "3.3"
+
+services: 
+  db:
+    image: postgres:9.6
+    container_name: ws-db
+    restart: always
+    environment:
+      POSTGRES_DB: ws
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "8888:5432"
+    networks:
+      - ws-network
+  ws:
+    container_name: websocket_server
+    build: websocket
+    command: ["sh", "run.sh"]
+    volumes:
+      - ./websocket:/code
+    ports:
+      - "6060:6789"
+    depends_on:
+      - db
+    networks:
+      - ws-network
+networks:
+  ws-network:
