@@ -52,7 +52,7 @@
                 plus = document.querySelector('.plus'),
                 value = document.querySelector('.value'),
                 users = document.querySelector('.users'),
-                websocket = new WebSocket("ws://127.0.0.1:6789/");
+                websocket = new WebSocket("ws://127.0.0.1:6060/");
             minus.onclick = function (event) {
                 websocket.send(JSON.stringify({action: 'minus'}));
             }
