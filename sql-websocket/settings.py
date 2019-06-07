@@ -15,5 +15,5 @@ PEM_PATH = None
 
 WEBSOCKET = {
     'HOST': '0.0.0.0',
-    'PORT': '6789'
+    'PORT': '6782'
 }

@@ -3,10 +3,11 @@
 import asyncio
 import json
 import logging
-
+import threading
 import websockets
-
-import notify
+import select
+import time
+from message import Message
 import settings
 from db import psql
 
@@ -18,42 +19,173 @@ class Websocket:
         self.host = settings.WEBSOCKET['HOST']
         self.port = settings.WEBSOCKET['PORT']
         self.db = psql.Database(
-            host = settings.DATABASES['HOST'],
-            port = settings.DATABASES['PORT'],
-            dbname= settings.DATABASES['NAME'],
-            user= settings.DATABASES['USER'],
-            password= settings.DATABASES['PASSWORD']
+            host=settings.DATABASES['HOST'],
+            port=settings.DATABASES['PORT'],
+            dbname=settings.DATABASES['NAME'],
+            user=settings.DATABASES['USER'],
+            password=settings.DATABASES['PASSWORD']
         )
 
         self.db.connect()
-
+        # self.notify =
         self.watch_list = {}
+        self.STATE = {'value': 0}
+        self.USERS = set()
 
+        self.watch_table = {}
 
-    def binding(self,table,action):
-        wt = db.create_binding_function(table,action)
-        self.watch_list[wt.name] = wt
-        return wt
+    def get_table_from_user_path(self, path):
+        # For example '/user/table'
+        try:
+            return path.split('/')[2]
+        except:
+            print("Path not valid")
+            return None
 
-    def start_binding(self,wt):
-        db.binding_callback(wt,callback)
+    def state_event(self):
+        return json.dumps({'type': 'state', **self.STATE})
 
-    def start(self):   
+    def users_event(self):
+        return json.dumps({'type': 'users', 'count': len(self.USERS)})
+
+    async def notify_state(self, table, message):
+        """[Notify state]
+
+        Arguments:
+            table {[type]} -- [description]
+            message {[type]} -- [description]
+        """
+        if self.watch_list[table]['USERS']:       # asyncio.wait doesn't accept an empty list
+            await asyncio.wait([user.send(message) for user in self.watch_list[table]['USERS']])
+
+    async def notify_users(self, table):
+        """[Notify user]
+
+        Arguments:
+            table {[type]} -- [description]
+        """
+        if self.watch_list[table]['USERS']:       # asyncio.wait doesn't accept an empty list
+            message = self.users_event()
+            await asyncio.wait([user.send(message) for user in self.watch_list[table]['USERS']])
+
+    async def register(self, websocket, path):
+        """[Register user into table watch list]
+
+        Arguments:
+            websocket {[type]} -- [description]
+            path {[type]} -- [description]
+        """
+
+        table = self.get_table_from_user_path(path)
+        if table not in self.watch_list:
+            self.binding(table, 'ALL')
+
+        self.watch_list[table]['USERS'].add(websocket)
+        await self.notify_users(table)
+
+    async def unregister(self, websocket, path):
+        """[Unregister user into table watch list]
+
+        Arguments:
+            websocket {[type]} -- [description]
+            path {[type]} -- [description]
+        """
+
+        table = self.get_table_from_user_path(path)
+
+        self.watch_list[table]['USERS'].remove(websocket)
+        await self.notify_users(table)
+
+    def notify(self, notify, watch_table):
+        print(notify)
+        print(watch_table)
+
+    def start_binding(self, watch_table):
+        """[Create binding on a channel]
+
+        Keyword Arguments:
+            binding_channel {str} -- [Channel name] (default: {'watch_realtime_table'})
+        """
+        channel = watch_table.channel_name
+        print("Start binding channel %s" % channel)
+        self.db.cur.execute("LISTEN "+channel+";")
+
+        print("Waiting for notifications on channel '%s'" %
+              (channel))
+
+        while True:
+            if select.select([self.db.con], [], [], 5) == ([], [], []):
+                print("Timeout: %s" % channel)
+            else:
+                self.db.con.poll()
+                while self.db.con.notifies:
+                    notify = self.db.con.notifies.pop(0)
+                    print("Got NOTIFY:", notify.pid,
+                          notify.channel, notify.payload)
+
+    def add_table_to_watch_list(self, watch_table):
+
+        self.watch_list[watch_table.table] = {}
+        self.watch_list[watch_table.table][watch_table.name] = watch_table
+
+    def binding(self, table, action):
+        try:
+            if action.upper() == 'ALL':
+                actions = ['INSERT', 'UPDATE', 'DELETE']
+            else:
+                actions = action
+            thread = []
+            for act in actions:
+                wt = self.db.create_binding_function(table, act)
+
+                if wt:
+                    thread.append(threading.Thread(
+                        target=self.start_binding, args=(wt,)))
+                    self.add_table_to_watch_list(wt)
+
+            for t in thread:
+                t.start()
+                time.sleep(10)
+            self.watch_list[wt.table]['USERS'] = set()
+
+        except Exception as e:
+            print("BINDIND ERROR ", e)
+
+    def process_data(self, data, path):
+        # if path in self.watch_table:
+        pass
+
+    async def database_notify(self, websocket, path):
+        # register(websocket) sends user_event() to websocket
+        if 'user' in path:
+            await self.register(websocket, path)
+        try:
+            await websocket.send(self.state_event())
+            async for message in websocket:
+                data = json.loads(message)
+
+                self.process_data(data, path)
+        finally:
+            if 'user' in path:
+                await self.unregister(websocket, path)
+
+    def start(self):
         try:
             if settings.SSL:
                 ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
                 ssl_context.load_cert_chain(
-                pathlib.Path(__file__).with_name(settings.PEM_PATH))
+                    pathlib.Path(__file__).with_name(settings.PEM_PATH))
 
                 start_server = websockets.serve(
-                    notify.Notify.database_notify, self.host, self.port, ssl=ssl_context)
+                    self.database_notify, self.host, self.port, ssl=ssl_context)
             else:
-                start_server = websockets.serve(notify.Notify.database_notify, self.host, self.port)
+                start_server = websockets.serve(
+                    self.database_notify, self.host, self.port)
 
-            print("Websocket is running on %s:%s"%(self.host,self.port))
+            print("Websocket is running on %s:%s" % (self.host, self.port))
             asyncio.get_event_loop().run_until_complete(
                 start_server)
             asyncio.get_event_loop().run_forever()
-            
+
         except KeyboardInterrupt:
             print("\nStopping Websocket")

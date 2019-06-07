@@ -6,6 +6,24 @@ import sys
 import select
 import psycopg2.extensions
 
+class WatchTable:
+    def __init__(self,table, action):
+        """[summary]
+        
+        Arguments:
+            table {[type]} -- [description]
+            action {[type]} -- [description]
+        """
+        
+        self.table = table
+        self.name = '%(table)s_on_%(action)s'%{'table':table, 'action':action.lower()}
+        self.function_name = 'notify_trigger_%s' % self.name
+        self.trigger_name = 'watch_%s_trigger' % self.name
+        self.channel_name = 'watch_%s_table' % self.name
+        self.action = action
+
+    def __str__(self):
+        return self.name
 
 class Database:
     def __init__(self, host='localhost', port='8888', dbname='ws', user='postgres', password='postgres'):
@@ -72,7 +90,7 @@ class Database:
             self.cur.execute(sql, params)
             # self.con.commit()
         except Exception as e:
-            print(e)
+            print("EXECUTE ERROR ",e)
 
     def fetch_sql(self):
         """[Query data]
@@ -94,27 +112,10 @@ class Database:
         if self.con:
             self.con.close()
 
-    def binding(self, watch_table):
-        """[Create binding on a channel]
+                
 
-        Keyword Arguments:
-            binding_channel {str} -- [Channel name] (default: {'watch_realtime_table'})
-        """
-        channel = watch_table.channel_name
-
-        self.cur.execute("LISTEN "+channel+";")
-
-        print("Waiting for notifications on channel '%s'" %
-              (channel))
-        while True:
-            if select.select([self.con], [], [], 5) == ([], [], []):
-                print("Timeout")
-            else:
-                self.con.poll()
-                while self.con.notifies:
-                    notify = self.con.notifies.pop(0)
-                    print("Got NOTIFY:", notify.pid,
-                          notify.channel, notify.payload)
+    # def notify(self,notify,watch_table):
+        
 
     def binding_callback(self, watch_table, callback):
         """[Binding with call back]
@@ -128,11 +129,11 @@ class Database:
         self.cur.execute("LISTEN "+channel+";")
 
         print("Waiting for notifications on channel '%s'" %
-              (self.binding_channel))
+              (channel))
 
         while True:
             if select.select([self.con], [], [], 5) == ([], [], []):
-                print("Timeout")
+                print("%s timeout"%channel)
             else:
                 self.con.poll()
                 while self.con.notifies:
@@ -140,7 +141,7 @@ class Database:
                     print("Got NOTIFY:", notify.pid,
                           notify.channel, notify.payload)
 
-                    callback(notify)
+                    # callback(notify,watch_table)
 
     def create_binding_function(self, table, action):
         """[Create binding function]
@@ -167,21 +168,14 @@ class Database:
                 "table": wt.table,
                 "action": wt.action
                 }
-        self.execute(sql)
-        self.watch_list.append(wt)
+        try:
+            self.execute(sql)
+        except Exception as e:
+            print("Error: %s"%e)
+        # self.watch_list.append(wt)
         return wt
 
-class WatchTable:
-    def __init__(self,table, action):
-        self.table = table
-        self.name = '%(table)s_on_%(action)s'%{'table':table, 'action':action}
-        self.function_name = 'notify_trigger_%s' % self.name
-        self.trigger_name = 'watch_%s_trigger' % self.name
-        self.channel_name = 'watch_%s_table' % self.name
-        self.action = action
 
-    def __str__(self):
-        return self.name
 
 # db = Database()
 # db.connect()
