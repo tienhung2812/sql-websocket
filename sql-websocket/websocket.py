@@ -27,7 +27,14 @@ class Websocket:
         )
 
         self.db.connect()
-        # self.notify =
+        self.db.create_notify_channel()
+        self.channel_name = settings.DB_CHANNEL_NAME
+        self.function_name = settings.DB_FUNCTION_NAME
+
+        t = threading.Thread(target=self.start_binding)
+        t.start()
+
+
         self.watch_list = {}
         self.STATE = {'value': 0}
         self.USERS = set()
@@ -100,13 +107,13 @@ class Websocket:
         print(notify)
         print(watch_table)
 
-    def start_binding(self, watch_table):
+    def start_binding(self):
         """[Create binding on a channel]
 
         Keyword Arguments:
             binding_channel {str} -- [Channel name] (default: {'watch_realtime_table'})
         """
-        channel = watch_table.channel_name
+        channel = self.channel_name
         print("Start binding channel %s" % channel)
         self.db.cur.execute("LISTEN "+channel+";")
 
@@ -136,12 +143,7 @@ class Websocket:
             
             wt = self.db.create_binding_function(table, actions)
             if wt:
-                    self.thread.append(threading.Thread(
-                        target=self.start_binding, args=(wt,)))
-                    self.add_table_to_watch_list(wt)
-
-            for t in self.thread:
-                t.start()
+                self.add_table_to_watch_list(wt)
                 # time.sleep((0.05))
             self.watch_list[wt.table]['USERS'] = set()
 

@@ -15,5 +15,8 @@ PEM_PATH = None
 
 WEBSOCKET = {
     'HOST': '0.0.0.0',
-    'PORT': '6782'
+    'PORT': '6780'
 }
+
+DB_CHANNEL_NAME = 'notify_sql_websocket'
+DB_FUNCTION_NAME = 'notify_sql_websocket_function'

@@ -5,7 +5,7 @@ import psycopg2
 import sys
 import select
 import psycopg2.extensions
-
+import settings
 class WatchTable:
     def __init__(self,table, action):
         """[summary]
@@ -18,9 +18,9 @@ class WatchTable:
             action = '_or_'.join(action)
         self.table = table
         self.name = '%(table)s_on_%(action)s'%{'table':table, 'action':action.lower()}
-        self.function_name = 'notify_trigger_%s' % self.name
+        self.function_name = settings.DB_FUNCTION_NAME
         self.trigger_name = 'watch_%s_trigger' % self.name
-        self.channel_name = 'watch_%s_table' % self.name
+        self.channel_name = settings.DB_CHANNEL_NAME
         self.action = action
 
     def __str__(self):
@@ -45,6 +45,8 @@ class Database:
 
         self.watch_list = []
 
+        self.channel_name = settings.DB_CHANNEL_NAME
+        self.function_name = settings.DB_FUNCTION_NAME
         self.binding_channel = 'watch_realtime_table'
 
     def connect(self):
@@ -68,6 +70,38 @@ class Database:
 
             print('Error %s' % e)
             sys.exit(1)
+
+    def create_notify_channel(self):
+        sql = """CREATE OR REPLACE FUNCTION %(function_name)s() RETURNS trigger AS $$
+            DECLARE
+                rec RECORD; 
+                payload TEXT;
+            BEGIN
+                CASE TG_OP
+                WHEN 'INSERT', 'UPDATE' THEN
+                    rec := NEW;
+                WHEN 'DELETE' THEN
+                    rec := OLD;
+                END CASE; 
+                payload := ''
+                            || '{'
+                            || '"timestamp":"' || CURRENT_TIMESTAMP                    || '",'
+                            || '"operation":"' || TG_OP                                || '",'
+                            || '"schema":"'    || TG_TABLE_SCHEMA                      || '",'
+                            || '"table":"'     || TG_TABLE_NAME                        || '",'
+                            || '"data":{'      || row_to_json(rec)::text || '}'
+                            || '}';
+                PERFORM pg_notify('%(channel_name)s', payload);
+                RETURN rec;
+            END;
+            $$ LANGUAGE plpgsql;""" %{
+                "function_name":self.function_name,
+                "channel_name": self.channel_name
+            }
+        try:
+            self.execute(sql)
+        except Exception as e:
+            print("Error: %s"%e)
 
     def dictfetchall(self, cursor):
         "Returns all rows from a cursor as a dict"
@@ -156,39 +190,15 @@ class Database:
         if len(actions) > 1:
             action_condition = ' OR '.join(actions)
         wt = WatchTable(table,actions)
-        sql = """CREATE FUNCTION %(function_name)s() RETURNS trigger AS $$
-            DECLARE
-                rec RECORD; 
-                payload TEXT;
-            BEGIN
-                CASE TG_OP
-                WHEN 'INSERT', 'UPDATE' THEN
-                    rec := NEW;
-                WHEN 'DELETE' THEN
-                    rec := OLD;
-                END CASE; 
-                payload := ''
-                            || '{'
-                            || '"timestamp":"' || CURRENT_TIMESTAMP                    || '",'
-                            || '"operation":"' || TG_OP                                || '",'
-                            || '"schema":"'    || TG_TABLE_SCHEMA                      || '",'
-                            || '"table":"'     || TG_TABLE_NAME                        || '",'
-                            || '"data":{'      || row_to_json(rec)::text || '}'
-                            || '}';
-                PERFORM pg_notify('%(channel_name)s', payload);
-                RETURN rec;
-            END;
-            $$ LANGUAGE plpgsql;
-
+        sql = """
             CREATE TRIGGER %(trigger_name)s AFTER %(action_condition)s ON %(table)s
             FOR EACH ROW EXECUTE PROCEDURE %(function_name)s();""" % {
-                "function_name": wt.function_name,
+                "function_name": self.function_name,
                 "trigger_name": wt.trigger_name,
-                "channel_name": wt.channel_name,
+                "channel_name": self.channel_name,
                 "table": wt.table,
                 "action_condition": action_condition
                 }
-        print(sql)
         try:
             self.execute(sql)
         except Exception as e:
