@@ -31,7 +31,7 @@ class Websocket:
         self.watch_list = {}
         self.STATE = {'value': 0}
         self.USERS = set()
-
+        self.thread = []
         self.watch_table = {}
 
     def get_table_from_user_path(self, path):
@@ -130,22 +130,19 @@ class Websocket:
 
     def binding(self, table, action):
         try:
+            actions = action
             if action.upper() == 'ALL':
                 actions = ['INSERT', 'UPDATE', 'DELETE']
-            else:
-                actions = action
-            thread = []
-            for act in actions:
-                wt = self.db.create_binding_function(table, act)
-
-                if wt:
-                    thread.append(threading.Thread(
+            
+            wt = self.db.create_binding_function(table, actions)
+            if wt:
+                    self.thread.append(threading.Thread(
                         target=self.start_binding, args=(wt,)))
                     self.add_table_to_watch_list(wt)
 
-            for t in thread:
+            for t in self.thread:
                 t.start()
-                time.sleep(10)
+                # time.sleep((0.05))
             self.watch_list[wt.table]['USERS'] = set()
 
         except Exception as e:

@@ -14,7 +14,8 @@ class WatchTable:
             table {[type]} -- [description]
             action {[type]} -- [description]
         """
-        
+        if len(action)>1:
+            action = '_or_'.join(action)
         self.table = table
         self.name = '%(table)s_on_%(action)s'%{'table':table, 'action':action.lower()}
         self.function_name = 'notify_trigger_%s' % self.name
@@ -143,7 +144,7 @@ class Database:
 
                     # callback(notify,watch_table)
 
-    def create_binding_function(self, table, action):
+    def create_binding_function(self, table, actions):
         """[Create binding function]
 
         Arguments:
@@ -151,23 +152,43 @@ class Database:
             action {[str]} -- [On action]
         """
 
-        wt = WatchTable(table,action)
+        action_condition = actions[0]
+        if len(actions) > 1:
+            action_condition = ' OR '.join(actions)
+        wt = WatchTable(table,actions)
         sql = """CREATE FUNCTION %(function_name)s() RETURNS trigger AS $$
             DECLARE
+                rec RECORD; 
+                payload TEXT;
             BEGIN
-                PERFORM pg_notify('%(channel_name)s', row_to_json(NEW)::text);
-                RETURN new;
+                CASE TG_OP
+                WHEN 'INSERT', 'UPDATE' THEN
+                    rec := NEW;
+                WHEN 'DELETE' THEN
+                    rec := OLD;
+                END CASE; 
+                payload := ''
+                            || '{'
+                            || '"timestamp":"' || CURRENT_TIMESTAMP                    || '",'
+                            || '"operation":"' || TG_OP                                || '",'
+                            || '"schema":"'    || TG_TABLE_SCHEMA                      || '",'
+                            || '"table":"'     || TG_TABLE_NAME                        || '",'
+                            || '"data":{'      || row_to_json(rec)::text || '}'
+                            || '}';
+                PERFORM pg_notify('%(channel_name)s', payload);
+                RETURN rec;
             END;
             $$ LANGUAGE plpgsql;
 
-            CREATE TRIGGER %(trigger_name)s AFTER %(action)s ON %(table)s
+            CREATE TRIGGER %(trigger_name)s AFTER %(action_condition)s ON %(table)s
             FOR EACH ROW EXECUTE PROCEDURE %(function_name)s();""" % {
                 "function_name": wt.function_name,
                 "trigger_name": wt.trigger_name,
                 "channel_name": wt.channel_name,
                 "table": wt.table,
-                "action": wt.action
+                "action_condition": action_condition
                 }
+        print(sql)
         try:
             self.execute(sql)
         except Exception as e:
