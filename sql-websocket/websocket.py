@@ -103,9 +103,9 @@ class Websocket:
         self.watch_list[table]['USERS'].remove(websocket)
         await self.notify_users(table)
 
-    def notify(self, notify, watch_table):
-        print(notify)
-        print(watch_table)
+    def notify(self, notify):
+        msg = Message(notify)
+        print(msg.get_message_in_str())
 
     def start_binding(self):
         """[Create binding on a channel]
@@ -129,6 +129,7 @@ class Websocket:
                     notify = self.db.con.notifies.pop(0)
                     print("Got NOTIFY:", notify.pid,
                           notify.channel, notify.payload)
+                    self.notify(notify)
 
     def add_table_to_watch_list(self, watch_table):
 
