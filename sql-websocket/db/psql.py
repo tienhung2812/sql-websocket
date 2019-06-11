@@ -89,8 +89,8 @@ class Database:
                             || '"operation":"' || TG_OP                                || '",'
                             || '"schema":"'    || TG_TABLE_SCHEMA                      || '",'
                             || '"table":"'     || TG_TABLE_NAME                        || '",'
-                            || '"data":{'      || row_to_json(rec)::text || '}'
-                            || '}';
+                            || '"data":'       || row_to_json(rec)::text               || '}';
+
                 PERFORM pg_notify('%(channel_name)s', payload);
                 RETURN rec;
             END;

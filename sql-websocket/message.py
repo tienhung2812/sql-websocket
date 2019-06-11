@@ -8,11 +8,25 @@ class Message:
             notify {[type]} -- [description]
             watch_table {[type]} -- [description]
         """
-        
+        """[Example]
+        {
+            "timestamp" : 2019-06-11 10:41:42.201576+07,
+            "operation" : INSERT,
+            "schema" : public,
+            "table" : realtime_table,
+            "data" : {
+                "id" : 43,
+                "title" : 5,
+                "year" : 2,
+                "producer" : 3
+            }
+        }
+        """ 
         self.payload = json.loads(notify.payload)
-        self.message_id = self.payload['id']
-        self.table = self.payload['table']
         self.data = self.payload['data']
+        self.message_id = self.data['id']
+        self.table = self.payload['table']
+        
         self.action = self.payload['operation']
 
 
