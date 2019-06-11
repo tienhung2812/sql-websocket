@@ -15,10 +15,10 @@ services:
       - ws-network
   ws:
     container_name: websocket_server
-    build: websocket
+    build: sql-websocket
     command: ["sh", "run.sh"]
     volumes:
-      - ./websocket:/code
+      - ./sql-websocket:/code
     ports:
       - "6060:6789"
     depends_on:
